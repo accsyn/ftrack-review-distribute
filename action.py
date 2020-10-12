@@ -38,12 +38,20 @@ logging.basicConfig(level=logging.DEBUG) # PUBREMOVE
 
 identifier = 'accsynreviewdistribute_v1.action'
 
+# Customize extensions for previews and file sequences
+PREVIEW_EXTENSIONS = ['.mov','.mp4']
+SEQUENCE_EXTENSIONS = ['.exr','.dpx','.tif','.tiff']
 
-# Replace this with the ID of accsyn desktop app/server running on same 
-# machine as action, or on another machine with access to files at their 
+# Change to false if accsyn server is on-prem and/or have direct access to 
+# published ftrack files.
+CLOUD_SERVER = False
+
+# (Cloud server) Replace this with the ID of accsyn desktop app/server running 
+# on same machine as action, or on another machine with access to files at their 
 # paths.
 
-ACCSYN_CLIENT_ID='5d84a31ace1bf9913a17cc20'
+ACCSYN_CLIENT_ID ='5d84a31ace1bf9913a17cc20'
+
 
 class AccsynReviewDistributeAction():
 
@@ -111,7 +119,8 @@ class AccsynReviewDistributeAction():
 
     def launch(self, event):
         #self.session._local_cache.clear()
-        self.logger.debug('(AS) Launch; Event items: {}'.format(str(event.items())))
+        self.logger.debug('(AS) Launch; Event items: {}'.format(
+            str(event.items())))
 
         selection = event['data'].get('selection', [])
         self.logger.info('(AS) Launch; Got selection: {0}'.format(selection))
@@ -127,21 +136,31 @@ class AccsynReviewDistributeAction():
             return self.log_and_return(
                 'Review session is empty - contains no versions!',False)
         participants = []
-        for ft_review_session_invitee in ft_review_session['review_session_invitees']:
+        for ft_review_session_invitee in \
+        ft_review_session['review_session_invitees']:
             participants.append(ft_review_session_invitee)
         if len(participants)==0:
             return self.log_and_return(
                 'Review session has no invitees/collaborators!', False)
-        share_name = "{}-review".format(ft_review_session['project']['name'])
-        share_path = "{}{}review".format(ft_review_session['project']['name'], os.sep)
-        directory = os.path.join(datetime.datetime.now().strftime("%Y%m%d"),ft_review_session['name'].lower().replace(' ','_'))
+
+        # Customize default values here
+        share_name = share_path = None
+        if CLOUD_SERVER:
+            share_name = "{}-review".format(
+                ft_review_session['project']['name'])
+            share_path = "{}{}review".format(
+                ft_review_session['project']['name'], os.sep)
+        directory = os.path.join(
+            datetime.datetime.now().strftime("%Y%m%d"),
+            ft_review_session['name'].lower().replace(' ','_'))
 
         if 'values' in event['data']:
             values = event['data']['values']
 
             recipients = values['recipients'].split(",")
-            share_name = values['share_name']
-            share_path = values['share_path']
+            if CLOUD_SERVER:
+                share_name = values['share_name']
+                share_path = values['share_path']
             directory = values['directory']
             additional_files = values['additional_files']
 
@@ -154,10 +173,14 @@ class AccsynReviewDistributeAction():
                     return self.log_and_return(
                         'Empty or invalid recipient: {}!'.format(
                             recipient),False)
-            if len(share_name)==0:
-                return self.log_and_return(
-                    'No intermediate accsyn share name given!',False)
-
+            if CLOUD_SERVER:
+                if len(share_name)==0:
+                    return self.log_and_return(
+                        'No intermediate accsyn share name given!',False)
+                if len(share_path)==0:
+                    return self.log_and_return(
+                        'No intermediate accsyn share path given!',False)
+            
             # Run in separate thread so we do not lock up action subsystem
             thread = threading.Thread(target=self.run, args=(
                 event, 
@@ -200,7 +223,10 @@ class AccsynReviewDistributeAction():
                     'name': 'recipients',
                     'value': ",".join([p['email'] for p in participants]),
                     'type': 'text'
-                },
+                }
+            ]
+            if CLOUD_SERVER:
+                widgets.extend([
                 {
                     'label': 'Intermediate accsyn share name:',
                     'name': 'share_name',
@@ -212,13 +238,13 @@ class AccsynReviewDistributeAction():
                     'name': 'share_path',
                     'value': share_path,
                     'type': 'text'
-                },{
-                    'label': 'Intermediate accsyn directory:',
-                    'name': 'directory',
-                    'value': directory,
-                    'type': 'text'
-                }
-            ]
+                }])
+            widgets.extend([{
+                'label': 'Intermediate accsyn directory:',
+                'name': 'directory',
+                'value': directory,
+                'type': 'text'
+            }])
 
             widgets.extend([
                 {
@@ -243,7 +269,15 @@ class AccsynReviewDistributeAction():
             ft_version['version']
         )
 
-    def run(self, event, ft_review_session, recipients, share_name, share_path, directory, additional_files):
+    def run(
+        self, 
+        event, 
+        ft_review_session, 
+        recipients, 
+        share_name, 
+        share_path, 
+        directory, 
+        additional_files):
 
         session = ftrack_api.Session(auto_connect_event_hub=False)
         accsyn_session = accsyn_api.Session()
@@ -351,12 +385,11 @@ class AccsynReviewDistributeAction():
                         prefix, ext = os.path.splitext(filename)
                         if 0<len(ext or ''):
                             # Add custom previwable file formats here
-                            if ext.lower() in ['.mov','.mp4']:
+                            if ext.lower() in PREVIEW_EXTENSIONS:
                                 previews.append(p_raw)
                                 version_had_files = True
                             # Add custom file sequence file formats here
-                            #elif ext.lower() in ['.exr','.dpx','.tif','.tiff']:
-                            elif ext.lower() in ['.exr','.dpx','.tif','.tiff','.jpg']: # PUBREMOVE
+                            elif ext.lower() in SEQUENCE_EXTENSIONS:
                                 sequences.append(p_raw)
                                 version_had_files = True
                     else:
@@ -371,10 +404,10 @@ class AccsynReviewDistributeAction():
                 for p_raw in additional_files.split('\n'):
                     if 0<len(p_raw or ''):
                         # Add custom previwable file formats here
-                        if ext.lower() in ['.mov','.mp4']:
+                        if ext.lower() in PREVIEW_EXTENSIONS:
                             previews.append(p_raw)
                         # Add custom file sequence file formats here
-                        elif ext.lower() in ['.exr','.dpx','.tif','.tiff']:
+                        elif ext.lower() in SEQUENCE_EXTENSIONS:
                             sequences.append(p_raw)
 
             if len(previews) == 0 and len(sequences) == 0:
@@ -383,23 +416,22 @@ class AccsynReviewDistributeAction():
                 job_final_status = 'failed'
                 return
 
-            # Remove this if server is on prem and serving file system file(s)
-            # resides on.
-            info('Checking share {}...'.format(share_name))
-            share = accsyn_session.find_one('Share where code="{}"'.format(
-                share_name))
-            if share is None:
-                warning('Share {} does not exist, creating...'.format(
+            if CLOUD_SERVER:
+                info('Checking share {}...'.format(share_name))
+                share = accsyn_session.find_one('Share where code="{}"'.format(
                     share_name))
-                share = accsyn_session.create('Share',{
-                    'code':share_name,
-                    'path':share_path
-                })
-                info('Created share {} with id {}.'.format(
-                    share['code'],share['id']))
+                if share is None:
+                    warning('Share {} does not exist, creating...'.format(
+                        share_name))
+                    share = accsyn_session.create('Share',{
+                        'code':share_name,
+                        'path':share_path
+                    })
+                    info('Created share {} with id {}.'.format(
+                        share['code'],share['id']))
 
-            info('Building accsyn job out of {} files(s)...'
-                .format(len(previews)+len(sequences)))
+                info('Building accsyn job out of {} files(s)...'
+                    .format(len(previews)+len(sequences)))
 
             accsyn_job_data = {
                 'name':'{}'.format(
@@ -410,9 +442,8 @@ class AccsynReviewDistributeAction():
             
             file_count = 0
 
-            # Empty this if server is on prem and serving file system file(s)
-            # resides on.
-            source_party = 'client={}:'.format(ACCSYN_CLIENT_ID)
+            if CLOUD_SERVER:
+                source_party = 'client={}:'.format(ACCSYN_CLIENT_ID)
 
             # First, add previews at high priority - send these first.
             for p_raw in previews:
@@ -420,25 +451,35 @@ class AccsynReviewDistributeAction():
 
                 # Put sequence parent directory in share and intermediate 
                 # directory at server, at user put in intermediate dir.
-                intermediate_path = 'share={}{}{}{}{}'.format(
-                    share_name,
-                    os.sep,
-                    directory,
-                    os.sep,
-                    os.path.basename(self.normpath(p_raw))
-                )
+                
                 destination_path = '{}{}{}'.format(
                     directory,
                     os.sep,
                     os.path.basename(self.normpath(p_raw))
                 )
 
-                accsyn_job_data['tasks'].append({
-                    'source':'{}{}'.format(source_party, p_raw),
-                    'destination':'{}:{}'.format(
-                        intermediate_path, destination_path),
-                    'priority':999
-                })
+                if CLOUD_SERVER:
+                    intermediate_path = 'share={}{}{}{}{}'.format(
+                        share_name,
+                        os.sep,
+                        directory,
+                        os.sep,
+                        os.path.basename(self.normpath(p_raw))
+                    )
+
+                    accsyn_job_data['tasks'].append({
+                        'source':'{}{}'.format(source_party, p_raw),
+                        'destination':'{}:{}'.format(
+                            intermediate_path, destination_path),
+                        'priority':999
+                    })
+                else:
+                    accsyn_job_data['tasks'].append({
+                        'source':'{}'.format(p_raw),
+                        'destination':'{}'.format(
+                            destination_path),
+                        'priority':999
+                    })
                 # If server is on prem and serving file system file(s) resides 
                 # on, replace destination with:
                 # 
@@ -453,24 +494,32 @@ class AccsynReviewDistributeAction():
                 # Put sequence parent directory in share and intermediate 
                 # directory at server, at user put in intermediate dir.
                 p = os.path.dirname(self.normpath(p_raw))
-                intermediate_path = 'share={}{}{}{}{}'.format(
-                    share_name,
-                    os.sep,
-                    directory,
-                    os.sep,
-                    os.path.basename(p)
-                )
+                
                 destination_path = '{}{}{}'.format(
                     directory,
                     os.sep,
                     os.path.basename(p)
                 )
+                if CLOUD_SERVER:
+                    intermediate_path = 'share={}{}{}{}{}'.format(
+                        share_name,
+                        os.sep,
+                        directory,
+                        os.sep,
+                        os.path.basename(p)
+                    )
 
-                accsyn_job_data['tasks'].append({
-                    'source':'{}{}'.format(source_party, p),
-                    'destination':'{}:{}'.format(
-                        intermediate_path, destination_path)
-                })
+                    accsyn_job_data['tasks'].append({
+                        'source':'{}{}'.format(source_party, p),
+                        'destination':'{}:{}'.format(
+                            intermediate_path, destination_path)
+                    })
+                else:
+                    accsyn_job_data['tasks'].append({
+                        'source':'{}'.format(p),
+                        'destination':'{}'.format(
+                            destination_path)
+                    })
                 # If server is on prem and serving file system file(s) resides 
                 # on, replace destination with:
                 # 
@@ -480,12 +529,14 @@ class AccsynReviewDistributeAction():
 
             info('Submitting transfer job to accsyn, {} file(s)/'
                 'directories(s)...'.format(file_count))
-            self.logger.debug('accsyn JSON submit data: {}'.format(accsyn_job_data))
+            self.logger.debug('accsyn JSON submit data: {}'.format(
+                accsyn_job_data))
 
-            j = accsyn_session.create('Job', accsyn_job_data)
+            result = accsyn_session.create('Job', accsyn_job_data)
             
             info('Submitted (id: {}), check accsyn app for progress'.format(
-                j['id']))
+                result['id'] if not isinstance(result, list) else 
+                ','.join([j['id'] for j in result])))
 
         except Exception as e:
             warning(traceback.format_exc())

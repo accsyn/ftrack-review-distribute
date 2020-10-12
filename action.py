@@ -33,8 +33,7 @@ import ftrack_api
 
 import accsyn_api
 
-#logging.basicConfig(level=logging.INFO)
-logging.basicConfig(level=logging.DEBUG) # PUBREMOVE
+logging.basicConfig(level=logging.INFO)
 
 identifier = 'accsynreviewdistribute_v1.action'
 
@@ -44,7 +43,7 @@ SEQUENCE_EXTENSIONS = ['.exr','.dpx','.tif','.tiff']
 
 # Change to false if accsyn server is on-prem and/or have direct access to 
 # published ftrack files.
-CLOUD_SERVER = False
+CLOUD_SERVER = True
 
 # (Cloud server) Replace this with the ID of accsyn desktop app/server running 
 # on same machine as action, or on another machine with access to files at their 
